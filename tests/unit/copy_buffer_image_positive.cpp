@@ -1913,3 +1913,43 @@ TEST_F(PositiveCopyBufferImage, CompressedMipLevels) {
     vk::CmdCopyImage(m_command_buffer, image_src, VK_IMAGE_LAYOUT_GENERAL, image_dst, VK_IMAGE_LAYOUT_GENERAL, 1, &copy_region);
     m_command_buffer.End();
 }
+
+TEST_F(PositiveCopyBufferImage, RotatedBlitImage) {
+    TEST_DESCRIPTION("Launch rotated blit image with a valid 2D, non-compressed, single-plane image.");
+    SetTargetApiVersion(VK_API_VERSION_1_3);
+    AddRequiredExtensions(VK_QCOM_ROTATED_COPY_COMMANDS_EXTENSION_NAME);
+    RETURN_IF_SKIP(Init());
+
+    constexpr VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
+    if (!FormatFeaturesAreSupported(Gpu(), format, VK_IMAGE_TILING_OPTIMAL,
+                                    VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT)) {
+        GTEST_SKIP() << "No blit feature format support";
+    }
+
+    auto image_ci = vkt::Image::ImageCreateInfo2D(32, 32, 1, 1, format,
+                                                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    vkt::Image src_image{*m_device, image_ci, vkt::set_layout};
+    vkt::Image dst_image{*m_device, image_ci, vkt::set_layout};
+
+    VkCopyCommandTransformInfoQCOM transform_info = vku::InitStructHelper();
+    transform_info.transform = VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR;
+
+    VkImageBlit2 blit_region = vku::InitStructHelper(&transform_info);
+    blit_region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    blit_region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    blit_region.srcOffsets[1] = {16, 16, 1};
+    blit_region.dstOffsets[1] = {16, 16, 1};
+
+    VkBlitImageInfo2 blit_image_info = vku::InitStructHelper();
+    blit_image_info.srcImage = src_image;
+    blit_image_info.srcImageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    blit_image_info.dstImage = dst_image;
+    blit_image_info.dstImageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    blit_image_info.regionCount = 1;
+    blit_image_info.pRegions = &blit_region;
+    blit_image_info.filter = VK_FILTER_NEAREST;
+
+    m_command_buffer.Begin();
+    vk::CmdBlitImage2(m_command_buffer, &blit_image_info);
+    m_command_buffer.End();
+}

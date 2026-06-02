@@ -3161,6 +3161,35 @@ bool CoreChecks::ValidateCmdBlitImage(VkCommandBuffer commandBuffer, VkImage src
         }
     }
 
+    if constexpr (std::is_same_v<RegionType, VkImageBlit2>) {
+        bool has_transform_info = false;
+        for (uint32_t index = 0; index < regionCount; ++index) {
+            if (vku::FindStructInPNextChain<VkCopyCommandTransformInfoQCOM>(pRegions[index].pNext)) {
+                has_transform_info = true;
+                break;
+            }
+        }
+        if (has_transform_info) {
+            if (vkuFormatIsCompressed(src_format) || vkuFormatIsCompressed(dst_format)) {
+                skip |= LogError("VUID-VkBlitImageInfo2-pRegions-04561", all_objlist, loc,
+                                 "has a region with VkCopyCommandTransformInfoQCOM in its pNext chain, "
+                                 "but srcImage format (%s) or dstImage format (%s) is block-compressed.",
+                                 string_VkFormat(src_format), string_VkFormat(dst_format));
+            }
+            if (src_type != VK_IMAGE_TYPE_2D) {
+                skip |= LogError("VUID-VkBlitImageInfo2KHR-pRegions-06207", src_objlist, src_image_loc,
+                                 "is (%s), but a region has VkCopyCommandTransformInfoQCOM in its pNext chain.",
+                                 string_VkImageType(src_type));
+            }
+            if (vkuFormatIsMultiplane(src_format)) {
+                skip |= LogError("VUID-VkBlitImageInfo2KHR-pRegions-06208", src_objlist, src_image_loc,
+                                 "has multi-planar format (%s), but a region has VkCopyCommandTransformInfoQCOM "
+                                 "in its pNext chain.",
+                                 string_VkFormat(src_format));
+            }
+        }
+    }
+
     const bool same_image = (src_image_state == dst_image_state);
     for (uint32_t i = 0; i < regionCount; i++) {
         const Location region_loc = loc.dot(Field::pRegions, i);

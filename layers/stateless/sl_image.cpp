@@ -1175,4 +1175,69 @@ bool Device::manual_PreCallValidateCmdResolveImage2(VkCommandBuffer commandBuffe
 
     return skip;
 }
+
+bool Device::manual_PreCallValidateCmdBlitImage2(VkCommandBuffer commandBuffer, const VkBlitImageInfo2* pBlitImageInfo,
+                                                 const Context& context) const {
+    bool skip = false;
+    const Location blit_image_loc = context.error_obj.location.dot(Field::pBlitImageInfo);
+    for (uint32_t index = 0; index < pBlitImageInfo->regionCount; ++index) {
+        const VkImageBlit2& region = pBlitImageInfo->pRegions[index];
+        if (const auto* transform_info = vku::FindStructInPNextChain<VkCopyCommandTransformInfoQCOM>(region.pNext)) {
+            if (!IsValueIn(transform_info->transform,
+                           {VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR, VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR,
+                            VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR, VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR})) {
+                skip |= LogError("VUID-VkCopyCommandTransformInfoQCOM-transform-04560", commandBuffer,
+                                 blit_image_loc.dot(Field::pRegions, index).pNext(Struct::VkCopyCommandTransformInfoQCOM, Field::transform),
+                                 "is (%s) that is unsupported.",
+                                 string_VkSurfaceTransformFlagBitsKHR(transform_info->transform));
+            }
+        }
+    }
+
+    return skip;
+}
+
+bool Device::manual_PreCallValidateCmdCopyBufferToImage2(VkCommandBuffer commandBuffer,
+                                                         const VkCopyBufferToImageInfo2* pCopyBufferToImageInfo,
+                                                         const Context& context) const {
+    bool skip = false;
+    const Location copy_info_loc = context.error_obj.location.dot(Field::pCopyBufferToImageInfo);
+    for (uint32_t index = 0; index < pCopyBufferToImageInfo->regionCount; ++index) {
+        const VkBufferImageCopy2& region = pCopyBufferToImageInfo->pRegions[index];
+        if (const auto* transform_info = vku::FindStructInPNextChain<VkCopyCommandTransformInfoQCOM>(region.pNext)) {
+            if (!IsValueIn(transform_info->transform,
+                           {VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR, VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR,
+                            VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR, VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR})) {
+                skip |= LogError("VUID-VkCopyCommandTransformInfoQCOM-transform-04560", commandBuffer,
+                                 copy_info_loc.dot(Field::pRegions, index).pNext(Struct::VkCopyCommandTransformInfoQCOM, Field::transform),
+                                 "is (%s) that is unsupported.",
+                                 string_VkSurfaceTransformFlagBitsKHR(transform_info->transform));
+            }
+        }
+    }
+
+    return skip;
+}
+
+bool Device::manual_PreCallValidateCmdCopyImageToBuffer2(VkCommandBuffer commandBuffer,
+                                                         const VkCopyImageToBufferInfo2* pCopyImageToBufferInfo,
+                                                         const Context& context) const {
+    bool skip = false;
+    const Location copy_info_loc = context.error_obj.location.dot(Field::pCopyImageToBufferInfo);
+    for (uint32_t index = 0; index < pCopyImageToBufferInfo->regionCount; ++index) {
+        const VkBufferImageCopy2& region = pCopyImageToBufferInfo->pRegions[index];
+        if (const auto* transform_info = vku::FindStructInPNextChain<VkCopyCommandTransformInfoQCOM>(region.pNext)) {
+            if (!IsValueIn(transform_info->transform,
+                           {VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR, VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR,
+                            VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR, VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR})) {
+                skip |= LogError("VUID-VkCopyCommandTransformInfoQCOM-transform-04560", commandBuffer,
+                                 copy_info_loc.dot(Field::pRegions, index).pNext(Struct::VkCopyCommandTransformInfoQCOM, Field::transform),
+                                 "is (%s) that is unsupported.",
+                                 string_VkSurfaceTransformFlagBitsKHR(transform_info->transform));
+            }
+        }
+    }
+
+    return skip;
+}
 }  // namespace stateless
