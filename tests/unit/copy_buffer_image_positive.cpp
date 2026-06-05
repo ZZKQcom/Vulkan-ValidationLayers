@@ -1953,3 +1953,65 @@ TEST_F(PositiveCopyBufferImage, RotatedBlitImage) {
     vk::CmdBlitImage2(m_command_buffer, &blit_image_info);
     m_command_buffer.End();
 }
+
+TEST_F(PositiveCopyBufferImage, RotatedCopyBufferToImage) {
+    TEST_DESCRIPTION("Launch rotated copy-buffer-to-image with a valid 2D, single-plane image.");
+    SetTargetApiVersion(VK_API_VERSION_1_3);
+    AddRequiredExtensions(VK_QCOM_ROTATED_COPY_COMMANDS_EXTENSION_NAME);
+    RETURN_IF_SKIP(Init());
+
+    constexpr VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
+    const auto image_ci = vkt::Image::ImageCreateInfo2D(32, 32, 1, 1, format, VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    vkt::Image dst_image{*m_device, image_ci, vkt::set_layout};
+    vkt::Buffer src_buffer{*m_device, 32 * 32 * 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
+
+    VkCopyCommandTransformInfoQCOM transform_info = vku::InitStructHelper();
+    transform_info.transform = VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR;
+
+    VkBufferImageCopy2 region = vku::InitStructHelper(&transform_info);
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.imageOffset = {16, 0, 0};
+    region.imageExtent = {16, 16, 1};
+
+    VkCopyBufferToImageInfo2 copy_info = vku::InitStructHelper();
+    copy_info.srcBuffer = src_buffer;
+    copy_info.dstImage = dst_image;
+    copy_info.dstImageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    copy_info.regionCount = 1;
+    copy_info.pRegions = &region;
+
+    m_command_buffer.Begin();
+    vk::CmdCopyBufferToImage2(m_command_buffer, &copy_info);
+    m_command_buffer.End();
+}
+
+TEST_F(PositiveCopyBufferImage, RotatedCopyImageToBuffer) {
+    TEST_DESCRIPTION("Launch rotated copy-image-to-buffer with a valid 2D, single-plane image.");
+    SetTargetApiVersion(VK_API_VERSION_1_3);
+    AddRequiredExtensions(VK_QCOM_ROTATED_COPY_COMMANDS_EXTENSION_NAME);
+    RETURN_IF_SKIP(Init());
+
+    constexpr VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
+    const auto image_ci = vkt::Image::ImageCreateInfo2D(32, 32, 1, 1, format, VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+    vkt::Image src_image{*m_device, image_ci, vkt::set_layout};
+    vkt::Buffer dst_buffer{*m_device, 32 * 32 * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT};
+
+    VkCopyCommandTransformInfoQCOM transform_info = vku::InitStructHelper();
+    transform_info.transform = VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR;
+
+    VkBufferImageCopy2 region = vku::InitStructHelper(&transform_info);
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.imageOffset = {16, 0, 0};
+    region.imageExtent = {16, 16, 1};
+
+    VkCopyImageToBufferInfo2 copy_info = vku::InitStructHelper();
+    copy_info.srcImage = src_image;
+    copy_info.srcImageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    copy_info.dstBuffer = dst_buffer;
+    copy_info.regionCount = 1;
+    copy_info.pRegions = &region;
+
+    m_command_buffer.Begin();
+    vk::CmdCopyImageToBuffer2(m_command_buffer, &copy_info);
+    m_command_buffer.End();
+}

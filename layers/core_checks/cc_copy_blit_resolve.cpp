@@ -485,6 +485,54 @@ uint32_t GetImageHeight<VkDeviceMemoryImageCopyKHR>(VkDeviceMemoryImageCopyKHR d
     return data.addressImageHeight;
 }
 
+struct CopyRegionBounds {
+    int64_t x0 = 0;
+    int64_t x1 = 0;
+    int64_t y0 = 0;
+    int64_t y1 = 0;
+    int64_t z0 = 0;
+    int64_t z1 = 0;
+};
+
+CopyRegionBounds GetCopyRegionBounds(const VkBufferImageCopy2& region, VkSurfaceTransformFlagBitsKHR transform) {
+    const int64_t offset_x = region.imageOffset.x;
+    const int64_t offset_y = region.imageOffset.y;
+    const int64_t offset_z = region.imageOffset.z;
+    const int64_t width = region.imageExtent.width;
+    const int64_t height = region.imageExtent.height;
+    const int64_t depth = region.imageExtent.depth;
+
+    CopyRegionBounds bounds{offset_x, offset_x + width, offset_y, offset_y + height, offset_z, offset_z + depth};
+    switch (transform) {
+        case VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR:
+            break;
+        case VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR:
+            bounds.x0 = offset_x - height;
+            bounds.x1 = offset_x;
+            bounds.y1 = offset_y + width;
+            break;
+        case VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR:
+            bounds.x0 = offset_x - width;
+            bounds.x1 = offset_x;
+            bounds.y0 = offset_y - height;
+            bounds.y1 = offset_y;
+            break;
+        case VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR:
+            bounds.x1 = offset_x + height;
+            bounds.y0 = offset_y - width;
+            bounds.y1 = offset_y;
+            break;
+        default:
+            break;
+    }
+    return bounds;
+}
+
+bool IsCopyRegionContained(const CopyRegionBounds& bounds, const VkExtent3D& image_extent) {
+    return bounds.x0 >= 0 && bounds.y0 >= 0 && bounds.z0 >= 0 && bounds.x1 <= image_extent.width &&
+           bounds.y1 <= image_extent.height && bounds.z1 <= image_extent.depth;
+}
+
 // Common between non-image to/from image copies
 // ex) BufferToImage, ImageToBuffer, MemoryToImage, and ImageToMemory
 template <typename RegionType>
@@ -530,8 +578,15 @@ bool CoreChecks::ValidateHeterogeneousCopyData(const RegionType& region, const v
     }
 
     const VkExtent3D effective_image_extent = image_state.GetEffectiveSubresourceExtent(region.imageSubresource);
+    const VkCopyCommandTransformInfoQCOM* transform_info = nullptr;
+    if constexpr (std::is_same_v<RegionType, VkBufferImageCopy2>) {
+        transform_info = vku::FindStructInPNextChain<VkCopyCommandTransformInfoQCOM>(region.pNext);
+    }
+    const bool is_transformed_copy = transform_info && IsValueIn(region_loc.function,
+                                                                 {Func::vkCmdCopyBufferToImage2, Func::vkCmdCopyBufferToImage2KHR,
+                                                                  Func::vkCmdCopyImageToBuffer2, Func::vkCmdCopyImageToBuffer2KHR});
     // check range of imageOffset and imageExtent
-    {
+    if (!is_transformed_copy) {
         if (region.imageOffset.x < 0) {
             skip |= LogError(GetCopyBufferImageVUID(region_loc, vvl::CopyError::ImageOffset_07971), objlist,
                              region_loc.dot(Field::imageOffset).dot(Field::x), "(%" PRId32 ") must be greater than zero.",
@@ -553,24 +608,27 @@ bool CoreChecks::ValidateHeterogeneousCopyData(const RegionType& region, const v
                          "(%" PRId32 ") + extent.height (%" PRIu32 ") exceeds imageSubresource height extent (%" PRIu32 ").\n%s",
                          region.imageOffset.y, region.imageExtent.height, effective_image_extent.height,
                          image_state.DescribeSubresourceLayers(region.imageSubresource).c_str());
-        } else if (region.imageOffset.z < 0) {
-            skip |= LogError(GetCopyBufferImageVUID(region_loc, vvl::CopyError::ImageOffset_09104), objlist,
-                             region_loc.dot(Field::imageOffset).dot(Field::z), "(%" PRId32 ") must be greater than zero.",
-                             region.imageOffset.z);
-        } else if ((uint64_t)region.imageOffset.z + (uint64_t)region.imageExtent.depth > (uint64_t)effective_image_extent.depth) {
-            skip |= LogError(GetCopyBufferImageVUID(region_loc, vvl::CopyError::ImageOffset_09104), objlist,
-                             region_loc.dot(Field::imageOffset).dot(Field::z),
-                             "(%" PRId32 ") + extent.depth (%" PRIu32 ") exceeds imageSubresource depth extent (%" PRIu32 ").\n%s",
-                             region.imageOffset.z, region.imageExtent.depth, effective_image_extent.depth,
-                             image_state.DescribeSubresourceLayers(region.imageSubresource).c_str());
         }
+    }
+    if (region.imageOffset.z < 0) {
+        skip |= LogError(GetCopyBufferImageVUID(region_loc, vvl::CopyError::ImageOffset_09104), objlist,
+                         region_loc.dot(Field::imageOffset).dot(Field::z), "(%" PRId32 ") must be greater than zero.",
+                         region.imageOffset.z);
+    } else if ((uint64_t)region.imageOffset.z + (uint64_t)region.imageExtent.depth > (uint64_t)effective_image_extent.depth) {
+        skip |= LogError(GetCopyBufferImageVUID(region_loc, vvl::CopyError::ImageOffset_09104), objlist,
+                         region_loc.dot(Field::imageOffset).dot(Field::z),
+                         "(%" PRId32 ") + extent.depth (%" PRIu32 ") exceeds imageSubresource depth extent (%" PRIu32 ").\n%s",
+                         region.imageOffset.z, region.imageExtent.depth, effective_image_extent.depth,
+                         image_state.DescribeSubresourceLayers(region.imageSubresource).c_str());
     }
 
     const VkFormat image_format = image_state.GetFormat();
 
     // if uncompressed, extent is {1,1,1} and non of this will matter
     const VkExtent3D block_extent = vkuFormatTexelBlockExtent(image_format);
-    if (!IsExtentAllOne(block_extent)) {
+    const bool skip_texel_block_extent_checks =
+        is_transformed_copy && transform_info->transform != VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+    if (!skip_texel_block_extent_checks && !IsExtentAllOne(block_extent)) {
         if (!IsIntegerMultipleOf(region.imageExtent.width, block_extent.width) &&
             (region.imageExtent.width + region.imageOffset.x != effective_image_extent.width)) {
             skip |= LogError(GetCopyBufferImageVUID(region_loc, vvl::CopyError::TexelBlockExtentWidth_00207), objlist,
@@ -2333,6 +2391,57 @@ bool CoreChecks::ValidateCmdCopyImageToBuffer(VkCommandBuffer commandBuffer, VkI
                                                region.imageExtent.depth, srcImageLayout, src_image_loc, vuid);
         skip |= ValidateCopyBufferImageTransferGranularityRequirements(cb_state, *src_image_state, region, objlist, region_loc);
 
+        if constexpr (std::is_same_v<RegionType, VkBufferImageCopy2>) {
+            const auto* transform_info = vku::FindStructInPNextChain<VkCopyCommandTransformInfoQCOM>(region.pNext);
+            if (transform_info) {
+                if (src_image_state->GetImageType() != VK_IMAGE_TYPE_2D) {
+                    skip |= LogError("VUID-VkCopyImageToBufferInfo2KHR-pRegions-06205", objlist, src_image_loc,
+                                     "is (%s), but a region has VkCopyCommandTransformInfoQCOM in its pNext chain.",
+                                     string_VkImageType(src_image_state->GetImageType()));
+                }
+                if (vkuFormatIsMultiplane(src_image_state->GetFormat())) {
+                    skip |= LogError("VUID-VkCopyImageToBufferInfo2KHR-pRegions-06206", objlist, src_image_loc,
+                                     "has multi-planar format (%s), but a region has VkCopyCommandTransformInfoQCOM "
+                                     "in its pNext chain.",
+                                     string_VkFormat(src_image_state->GetFormat()));
+                }
+                const VkExtent3D block_extent = vkuFormatTexelBlockExtent(src_image_state->GetFormat());
+                if (!IsExtentAllOne(block_extent)) {
+                    skip |= LogError("VUID-VkCopyImageToBufferInfo2KHR-pRegions-04558", objlist, src_image_loc,
+                                     "has texel block extent (%s), but a region has VkCopyCommandTransformInfoQCOM "
+                                     "in its pNext chain.",
+                                     string_VkExtent3D(block_extent).c_str());
+                }
+            }
+
+            const VkExtent3D image_extent = src_image_state->GetEffectiveSubresourceExtent(region.imageSubresource);
+            if (transform_info) {
+                if (IsValueIn(transform_info->transform,
+                              {VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR, VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR,
+                               VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR, VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR})) {
+                    const CopyRegionBounds bounds = GetCopyRegionBounds(region, transform_info->transform);
+                    if (!IsCopyRegionContained(bounds, image_extent)) {
+                        skip |= LogError("VUID-VkCopyImageToBufferInfo2KHR-pRegions-04557", objlist, region_loc,
+                                         "rotated source region spans x [%" PRId64 ", %" PRId64 "], y [%" PRId64 ", %" PRId64
+                                         "], z [%" PRId64 ", %" PRId64 "] outside imageSubresource extent (%s).\n%s",
+                                         bounds.x0, bounds.x1, bounds.y0, bounds.y1, bounds.z0, bounds.z1,
+                                         string_VkExtent3D(image_extent).c_str(),
+                                         src_image_state->DescribeSubresourceLayers(region.imageSubresource).c_str());
+                    }
+                }
+            } else {
+                const CopyRegionBounds bounds = GetCopyRegionBounds(region, VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR);
+                if (!IsCopyRegionContained(bounds, image_extent)) {
+                    skip |= LogError("VUID-VkCopyImageToBufferInfo2-pRegions-04566", objlist, region_loc,
+                                     "source region spans x [%" PRId64 ", %" PRId64 "], y [%" PRId64 ", %" PRId64
+                                     "], z [%" PRId64 ", %" PRId64 "] outside imageSubresource extent (%s).\n%s",
+                                     bounds.x0, bounds.x1, bounds.y0, bounds.y1, bounds.z0, bounds.z1,
+                                     string_VkExtent3D(image_extent).c_str(),
+                                     src_image_state->DescribeSubresourceLayers(region.imageSubresource).c_str());
+                }
+            }
+        }
+
         skip |= ValidateBufferBounds(cb_state, *src_image_state, *dst_buffer_state, region, region_loc);
 
         if (!enabled_features.maintenance10) {
@@ -2509,6 +2618,56 @@ bool CoreChecks::ValidateCmdCopyBufferToImage(VkCommandBuffer commandBuffer, VkB
         skip |= ValidateSubresourceImageLayout(cb_state, *dst_image_state, region.imageSubresource, region.imageOffset.z,
                                                region.imageExtent.depth, dstImageLayout, dst_image_loc, vuid);
         skip |= ValidateCopyBufferImageTransferGranularityRequirements(cb_state, *dst_image_state, region, objlist, region_loc);
+        if constexpr (std::is_same_v<RegionType, VkBufferImageCopy2>) {
+            const auto* transform_info = vku::FindStructInPNextChain<VkCopyCommandTransformInfoQCOM>(region.pNext);
+            if (transform_info) {
+                if (dst_image_state->GetImageType() != VK_IMAGE_TYPE_2D) {
+                    skip |= LogError("VUID-VkCopyBufferToImageInfo2KHR-pRegions-06203", objlist, dst_image_loc,
+                                     "is (%s), but a region has VkCopyCommandTransformInfoQCOM in its pNext chain.",
+                                     string_VkImageType(dst_image_state->GetImageType()));
+                }
+                if (vkuFormatIsMultiplane(dst_image_state->GetFormat())) {
+                    skip |= LogError("VUID-VkCopyBufferToImageInfo2KHR-pRegions-06204", objlist, dst_image_loc,
+                                     "has multi-planar format (%s), but a region has VkCopyCommandTransformInfoQCOM "
+                                     "in its pNext chain.",
+                                     string_VkFormat(dst_image_state->GetFormat()));
+                }
+                const VkExtent3D block_extent = vkuFormatTexelBlockExtent(dst_image_state->GetFormat());
+                if (!IsExtentAllOne(block_extent)) {
+                    skip |= LogError("VUID-VkCopyBufferToImageInfo2KHR-pRegions-04555", objlist, dst_image_loc,
+                                     "has texel block extent (%s), but a region has VkCopyCommandTransformInfoQCOM "
+                                     "in its pNext chain.",
+                                     string_VkExtent3D(block_extent).c_str());
+                }
+            }
+
+            const VkExtent3D image_extent = dst_image_state->GetEffectiveSubresourceExtent(region.imageSubresource);
+            if (transform_info) {
+                if (IsValueIn(transform_info->transform,
+                              {VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR, VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR,
+                               VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR, VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR})) {
+                    const CopyRegionBounds bounds = GetCopyRegionBounds(region, transform_info->transform);
+                    if (!IsCopyRegionContained(bounds, image_extent)) {
+                        skip |= LogError("VUID-VkCopyBufferToImageInfo2KHR-pRegions-04554", objlist, region_loc,
+                                         "rotated destination region spans x [%" PRId64 ", %" PRId64 "], y [%" PRId64 ", %" PRId64
+                                         "], z [%" PRId64 ", %" PRId64 "] outside imageSubresource extent (%s).\n%s",
+                                         bounds.x0, bounds.x1, bounds.y0, bounds.y1, bounds.z0, bounds.z1,
+                                         string_VkExtent3D(image_extent).c_str(),
+                                         dst_image_state->DescribeSubresourceLayers(region.imageSubresource).c_str());
+                    }
+                }
+            } else {
+                const CopyRegionBounds bounds = GetCopyRegionBounds(region, VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR);
+                if (!IsCopyRegionContained(bounds, image_extent)) {
+                    skip |= LogError("VUID-VkCopyBufferToImageInfo2-pRegions-04565", objlist, region_loc,
+                                     "destination region spans x [%" PRId64 ", %" PRId64 "], y [%" PRId64 ", %" PRId64
+                                     "], z [%" PRId64 ", %" PRId64 "] outside imageSubresource extent (%s).\n%s",
+                                     bounds.x0, bounds.x1, bounds.y0, bounds.y1, bounds.z0, bounds.z1,
+                                     string_VkExtent3D(image_extent).c_str(),
+                                     dst_image_state->DescribeSubresourceLayers(region.imageSubresource).c_str());
+                }
+            }
+        }
 
         skip |= ValidateBufferBounds(cb_state, *dst_image_state, *src_buffer_state, region, region_loc);
 

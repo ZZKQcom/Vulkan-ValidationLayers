@@ -789,10 +789,6 @@ const char* not_going_to_do[] = {
     // We tried to add these a while ago, it had constant false positives
     // The issue is we can't actually determine the size of the image as that is an opaque object
     // Trying to do this is only going to lead to more bad false positives
-    "VUID-VkCopyBufferToImageInfo2-pRegions-04565",
-    "VUID-VkCopyBufferToImageInfo2KHR-pRegions-04554",
-    "VUID-VkCopyImageToBufferInfo2-pRegions-04566",
-    "VUID-VkCopyImageToBufferInfo2KHR-pRegions-04557",
     "VUID-VkImageToMemoryCopy-pRegions-09067",
     "VUID-VkMemoryToImageCopy-pRegions-09062",
     "VUID-VkResolveImageInfo2-pRegions-00255",

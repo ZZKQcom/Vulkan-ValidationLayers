@@ -4227,6 +4227,7 @@ TEST_F(NegativeCopyBufferImage, SmallImageCopyCommand2) {
 
     m_command_buffer.Begin();
     m_errorMonitor->SetDesiredError("VUID-VkCopyBufferToImageInfo2-pRegions-06223");
+    m_errorMonitor->SetDesiredError("VUID-VkCopyBufferToImageInfo2-pRegions-04565");
     vk::CmdCopyBufferToImage2(m_command_buffer, &copy_info);
     m_errorMonitor->VerifyFound();
 }
@@ -5419,6 +5420,259 @@ TEST_F(NegativeCopyBufferImage, RotatedCopyBufferToImageButUseUnsupportedTransfo
     m_command_buffer.End();
 }
 
+TEST_F(NegativeCopyBufferImage, RotatedCopyBufferToImageButUse3DImage) {
+    TEST_DESCRIPTION("Try to launch rotated copy-buffer-to-image, but the destination image is 3D.");
+    SetTargetApiVersion(VK_API_VERSION_1_3);
+    AddRequiredExtensions(VK_QCOM_ROTATED_COPY_COMMANDS_EXTENSION_NAME);
+    RETURN_IF_SKIP(Init());
+
+    constexpr VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
+    VkImageCreateInfo image_ci = vku::InitStructHelper();
+    image_ci.imageType = VK_IMAGE_TYPE_3D;
+    image_ci.format = format;
+    image_ci.extent = {32, 32, 4};
+    image_ci.mipLevels = 1;
+    image_ci.arrayLayers = 1;
+    image_ci.samples = VK_SAMPLE_COUNT_1_BIT;
+    image_ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+    image_ci.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    vkt::Image dst_image{*m_device, image_ci, vkt::set_layout};
+    vkt::Buffer src_buffer{*m_device, 32 * 32 * 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
+
+    VkCopyCommandTransformInfoQCOM transform_info = vku::InitStructHelper();
+    transform_info.transform = VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR;
+
+    VkBufferImageCopy2 region = vku::InitStructHelper(&transform_info);
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.imageOffset = {16, 0, 0};
+    region.imageExtent = {16, 16, 1};
+
+    VkCopyBufferToImageInfo2 copy_info = vku::InitStructHelper();
+    copy_info.srcBuffer = src_buffer;
+    copy_info.dstImage = dst_image;
+    copy_info.dstImageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    copy_info.regionCount = 1;
+    copy_info.pRegions = &region;
+
+    m_command_buffer.Begin();
+    m_errorMonitor->SetDesiredError("VUID-VkCopyBufferToImageInfo2KHR-pRegions-06203");
+    vk::CmdCopyBufferToImage2(m_command_buffer, &copy_info);
+    m_errorMonitor->VerifyFound();
+    m_command_buffer.End();
+}
+
+TEST_F(NegativeCopyBufferImage, RotatedCopyBufferToImageButUseMultiPlanarImage) {
+    TEST_DESCRIPTION("Try to launch rotated copy-buffer-to-image, but the destination image is multi-planar.");
+    SetTargetApiVersion(VK_API_VERSION_1_3);
+    AddRequiredExtensions(VK_QCOM_ROTATED_COPY_COMMANDS_EXTENSION_NAME);
+    AddRequiredFeature(vkt::Feature::samplerYcbcrConversion);
+    RETURN_IF_SKIP(Init());
+
+    constexpr VkFormat format = VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
+    if (!FormatFeaturesAreSupported(Gpu(), format, VK_IMAGE_TILING_OPTIMAL, VK_FORMAT_FEATURE_TRANSFER_DST_BIT)) {
+        GTEST_SKIP() << "VK_FORMAT_G8_B8R8_2PLANE_420_UNORM doesn't support transfer destination, skipping test.";
+    }
+
+    const auto image_ci = vkt::Image::ImageCreateInfo2D(32, 32, 1, 1, format, VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    vkt::Image dst_image{*m_device, image_ci, vkt::set_layout};
+    vkt::Buffer src_buffer{*m_device, 32 * 32 * 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
+
+    VkCopyCommandTransformInfoQCOM transform_info = vku::InitStructHelper();
+    transform_info.transform = VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR;
+
+    VkBufferImageCopy2 region = vku::InitStructHelper(&transform_info);
+    region.imageSubresource = {VK_IMAGE_ASPECT_PLANE_0_BIT, 0, 0, 1};
+    region.imageOffset = {16, 0, 0};
+    region.imageExtent = {16, 16, 1};
+
+    VkCopyBufferToImageInfo2 copy_info = vku::InitStructHelper();
+    copy_info.srcBuffer = src_buffer;
+    copy_info.dstImage = dst_image;
+    copy_info.dstImageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    copy_info.regionCount = 1;
+    copy_info.pRegions = &region;
+
+    m_command_buffer.Begin();
+    m_errorMonitor->SetDesiredError("VUID-VkCopyBufferToImageInfo2KHR-pRegions-06204");
+    vk::CmdCopyBufferToImage2(m_command_buffer, &copy_info);
+    m_errorMonitor->VerifyFound();
+    m_command_buffer.End();
+}
+
+TEST_F(NegativeCopyBufferImage, RotatedCopyBufferToImageButUseBlockCompressedImage) {
+    TEST_DESCRIPTION("Try to launch rotated copy-buffer-to-image, but the destination image has a block-compressed format.");
+    SetTargetApiVersion(VK_API_VERSION_1_3);
+    AddRequiredExtensions(VK_QCOM_ROTATED_COPY_COMMANDS_EXTENSION_NAME);
+    RETURN_IF_SKIP(Init());
+
+    constexpr VkFormat format = VK_FORMAT_BC3_UNORM_BLOCK;
+    if (!FormatFeaturesAreSupported(Gpu(), format, VK_IMAGE_TILING_OPTIMAL, VK_FORMAT_FEATURE_TRANSFER_DST_BIT)) {
+        GTEST_SKIP() << "VK_FORMAT_BC3_UNORM_BLOCK doesn't support transfer destination, skipping test.";
+    }
+
+    const auto image_ci = vkt::Image::ImageCreateInfo2D(32, 32, 1, 1, format, VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    vkt::Image dst_image{*m_device, image_ci, vkt::set_layout};
+    vkt::Buffer src_buffer{*m_device, 4096, VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
+
+    VkCopyCommandTransformInfoQCOM transform_info = vku::InitStructHelper();
+    transform_info.transform = VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR;
+
+    VkBufferImageCopy2 region = vku::InitStructHelper(&transform_info);
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.imageOffset = {16, 0, 0};
+    region.imageExtent = {16, 16, 1};
+
+    VkCopyBufferToImageInfo2 copy_info = vku::InitStructHelper();
+    copy_info.srcBuffer = src_buffer;
+    copy_info.dstImage = dst_image;
+    copy_info.dstImageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    copy_info.regionCount = 1;
+    copy_info.pRegions = &region;
+
+    m_command_buffer.Begin();
+    m_errorMonitor->SetDesiredError("VUID-VkCopyBufferToImageInfo2KHR-pRegions-04555");
+    vk::CmdCopyBufferToImage2(m_command_buffer, &copy_info);
+    m_errorMonitor->VerifyFound();
+    m_command_buffer.End();
+}
+
+TEST_F(NegativeCopyBufferImage, RotatedCopyBufferToImageIdentityWithUnalignedWidth) {
+    TEST_DESCRIPTION("Try to launch copy-buffer-to-image with an identity transform, but the extent width is not block-aligned.");
+    SetTargetApiVersion(VK_API_VERSION_1_3);
+    AddRequiredExtensions(VK_QCOM_ROTATED_COPY_COMMANDS_EXTENSION_NAME);
+    RETURN_IF_SKIP(Init());
+
+    constexpr VkFormat format = VK_FORMAT_BC3_UNORM_BLOCK;
+    if (!FormatFeaturesAreSupported(Gpu(), format, VK_IMAGE_TILING_OPTIMAL, VK_FORMAT_FEATURE_TRANSFER_DST_BIT)) {
+        GTEST_SKIP() << "VK_FORMAT_BC3_UNORM_BLOCK doesn't support transfer destination, skipping test.";
+    }
+
+    const auto image_ci = vkt::Image::ImageCreateInfo2D(32, 32, 1, 1, format, VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    vkt::Image dst_image{*m_device, image_ci, vkt::set_layout};
+    vkt::Buffer src_buffer{*m_device, 4096, VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
+
+    VkCopyCommandTransformInfoQCOM transform_info = vku::InitStructHelper();
+    transform_info.transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+
+    VkBufferImageCopy2 region = vku::InitStructHelper(&transform_info);
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.imageExtent = {14, 16, 1};
+
+    VkCopyBufferToImageInfo2 copy_info = vku::InitStructHelper();
+    copy_info.srcBuffer = src_buffer;
+    copy_info.dstImage = dst_image;
+    copy_info.dstImageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    copy_info.regionCount = 1;
+    copy_info.pRegions = &region;
+
+    m_command_buffer.Begin();
+    m_errorMonitor->SetDesiredError("VUID-VkCopyBufferToImageInfo2KHR-pRegions-04555");
+    m_errorMonitor->SetDesiredError("VUID-VkCopyBufferToImageInfo2-dstImage-00207");
+    vk::CmdCopyBufferToImage2(m_command_buffer, &copy_info);
+    m_errorMonitor->VerifyFound();
+    m_command_buffer.End();
+}
+
+TEST_F(NegativeCopyBufferImage, RotatedCopyBufferToImageIdentityWithUnalignedHeight) {
+    TEST_DESCRIPTION("Try to launch copy-buffer-to-image with an identity transform, but the extent height is not block-aligned.");
+    SetTargetApiVersion(VK_API_VERSION_1_3);
+    AddRequiredExtensions(VK_QCOM_ROTATED_COPY_COMMANDS_EXTENSION_NAME);
+    RETURN_IF_SKIP(Init());
+
+    constexpr VkFormat format = VK_FORMAT_BC3_UNORM_BLOCK;
+    if (!FormatFeaturesAreSupported(Gpu(), format, VK_IMAGE_TILING_OPTIMAL, VK_FORMAT_FEATURE_TRANSFER_DST_BIT)) {
+        GTEST_SKIP() << "VK_FORMAT_BC3_UNORM_BLOCK doesn't support transfer destination, skipping test.";
+    }
+
+    const auto image_ci = vkt::Image::ImageCreateInfo2D(32, 32, 1, 1, format, VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    vkt::Image dst_image{*m_device, image_ci, vkt::set_layout};
+    vkt::Buffer src_buffer{*m_device, 4096, VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
+
+    VkCopyCommandTransformInfoQCOM transform_info = vku::InitStructHelper();
+    transform_info.transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+
+    VkBufferImageCopy2 region = vku::InitStructHelper(&transform_info);
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.imageExtent = {16, 14, 1};
+
+    VkCopyBufferToImageInfo2 copy_info = vku::InitStructHelper();
+    copy_info.srcBuffer = src_buffer;
+    copy_info.dstImage = dst_image;
+    copy_info.dstImageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    copy_info.regionCount = 1;
+    copy_info.pRegions = &region;
+
+    m_command_buffer.Begin();
+    m_errorMonitor->SetDesiredError("VUID-VkCopyBufferToImageInfo2KHR-pRegions-04555");
+    m_errorMonitor->SetDesiredError("VUID-VkCopyBufferToImageInfo2-dstImage-00208");
+    vk::CmdCopyBufferToImage2(m_command_buffer, &copy_info);
+    m_errorMonitor->VerifyFound();
+    m_command_buffer.End();
+}
+
+TEST_F(NegativeCopyBufferImage, RotatedCopyBufferToImageButDestinationRegionIsOutsideImage) {
+    TEST_DESCRIPTION("Try to launch rotated copy-buffer-to-image, but the rotated destination region is outside the image.");
+    SetTargetApiVersion(VK_API_VERSION_1_3);
+    AddRequiredExtensions(VK_QCOM_ROTATED_COPY_COMMANDS_EXTENSION_NAME);
+    RETURN_IF_SKIP(Init());
+
+    constexpr VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
+    const auto image_ci = vkt::Image::ImageCreateInfo2D(32, 32, 1, 1, format, VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    vkt::Image dst_image{*m_device, image_ci, vkt::set_layout};
+    vkt::Buffer src_buffer{*m_device, 32 * 32 * 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
+
+    VkCopyCommandTransformInfoQCOM transform_info = vku::InitStructHelper();
+    transform_info.transform = VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR;
+
+    VkBufferImageCopy2 region = vku::InitStructHelper(&transform_info);
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.imageOffset = {8, 0, 0};
+    region.imageExtent = {16, 16, 1};
+
+    VkCopyBufferToImageInfo2 copy_info = vku::InitStructHelper();
+    copy_info.srcBuffer = src_buffer;
+    copy_info.dstImage = dst_image;
+    copy_info.dstImageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    copy_info.regionCount = 1;
+    copy_info.pRegions = &region;
+
+    m_command_buffer.Begin();
+    m_errorMonitor->SetDesiredError("VUID-VkCopyBufferToImageInfo2KHR-pRegions-04554");
+    vk::CmdCopyBufferToImage2(m_command_buffer, &copy_info);
+    m_errorMonitor->VerifyFound();
+    m_command_buffer.End();
+}
+
+TEST_F(NegativeCopyBufferImage, CopyBufferToImage2ButDestinationRegionIsOutsideImage) {
+    TEST_DESCRIPTION("Try to launch copy-buffer-to-image2, but the destination region is outside the image.");
+    SetTargetApiVersion(VK_API_VERSION_1_3);
+    RETURN_IF_SKIP(Init());
+
+    constexpr VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
+    const auto image_ci = vkt::Image::ImageCreateInfo2D(32, 32, 1, 1, format, VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    vkt::Image dst_image{*m_device, image_ci, vkt::set_layout};
+    vkt::Buffer src_buffer{*m_device, 32 * 32 * 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
+
+    VkBufferImageCopy2 region = vku::InitStructHelper();
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.imageOffset = {24, 0, 0};
+    region.imageExtent = {16, 16, 1};
+
+    VkCopyBufferToImageInfo2 copy_info = vku::InitStructHelper();
+    copy_info.srcBuffer = src_buffer;
+    copy_info.dstImage = dst_image;
+    copy_info.dstImageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    copy_info.regionCount = 1;
+    copy_info.pRegions = &region;
+
+    m_command_buffer.Begin();
+    m_errorMonitor->SetDesiredError("VUID-VkCopyBufferToImageInfo2-pRegions-06223");
+    m_errorMonitor->SetDesiredError("VUID-VkCopyBufferToImageInfo2-pRegions-04565");
+    vk::CmdCopyBufferToImage2(m_command_buffer, &copy_info);
+    m_errorMonitor->VerifyFound();
+    m_command_buffer.End();
+}
+
 TEST_F(NegativeCopyBufferImage, RotatedCopyImageToBufferButUseUnsupportedTransformValue) {
     TEST_DESCRIPTION("Try to launch rotated copy-image-to-buffer, but use an unsupported transform enumeration value.");
     SetTargetApiVersion(VK_API_VERSION_1_3);
@@ -5446,6 +5700,222 @@ TEST_F(NegativeCopyBufferImage, RotatedCopyImageToBufferButUseUnsupportedTransfo
 
     m_command_buffer.Begin();
     m_errorMonitor->SetDesiredError("VUID-VkCopyCommandTransformInfoQCOM-transform-04560");
+    vk::CmdCopyImageToBuffer2(m_command_buffer, &copy_info);
+    m_errorMonitor->VerifyFound();
+    m_command_buffer.End();
+}
+
+TEST_F(NegativeCopyBufferImage, RotatedCopyImageToBufferButUse3DImage) {
+    TEST_DESCRIPTION("Try to launch rotated copy-image-to-buffer, but the source image is 3D.");
+    SetTargetApiVersion(VK_API_VERSION_1_3);
+    AddRequiredExtensions(VK_QCOM_ROTATED_COPY_COMMANDS_EXTENSION_NAME);
+    RETURN_IF_SKIP(Init());
+
+    constexpr VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
+    VkImageCreateInfo image_ci = vku::InitStructHelper();
+    image_ci.imageType = VK_IMAGE_TYPE_3D;
+    image_ci.format = format;
+    image_ci.extent = {32, 32, 4};
+    image_ci.mipLevels = 1;
+    image_ci.arrayLayers = 1;
+    image_ci.samples = VK_SAMPLE_COUNT_1_BIT;
+    image_ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+    image_ci.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    vkt::Image src_image{*m_device, image_ci, vkt::set_layout};
+    vkt::Buffer dst_buffer{*m_device, 32 * 32 * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT};
+
+    VkCopyCommandTransformInfoQCOM transform_info = vku::InitStructHelper();
+    transform_info.transform = VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR;
+
+    VkBufferImageCopy2 region = vku::InitStructHelper(&transform_info);
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.imageOffset = {16, 0, 0};
+    region.imageExtent = {16, 16, 1};
+
+    VkCopyImageToBufferInfo2 copy_info = vku::InitStructHelper();
+    copy_info.srcImage = src_image;
+    copy_info.srcImageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    copy_info.dstBuffer = dst_buffer;
+    copy_info.regionCount = 1;
+    copy_info.pRegions = &region;
+
+    m_command_buffer.Begin();
+    m_errorMonitor->SetDesiredError("VUID-VkCopyImageToBufferInfo2KHR-pRegions-06205");
+    vk::CmdCopyImageToBuffer2(m_command_buffer, &copy_info);
+    m_errorMonitor->VerifyFound();
+    m_command_buffer.End();
+}
+
+TEST_F(NegativeCopyBufferImage, RotatedCopyImageToBufferButUseMultiPlanarImage) {
+    TEST_DESCRIPTION("Try to launch rotated copy-image-to-buffer, but the source image is multi-planar.");
+    SetTargetApiVersion(VK_API_VERSION_1_3);
+    AddRequiredExtensions(VK_QCOM_ROTATED_COPY_COMMANDS_EXTENSION_NAME);
+    AddRequiredFeature(vkt::Feature::samplerYcbcrConversion);
+    RETURN_IF_SKIP(Init());
+
+    constexpr VkFormat format = VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
+    if (!FormatFeaturesAreSupported(Gpu(), format, VK_IMAGE_TILING_OPTIMAL, VK_FORMAT_FEATURE_TRANSFER_SRC_BIT)) {
+        GTEST_SKIP() << "VK_FORMAT_G8_B8R8_2PLANE_420_UNORM doesn't support transfer source, skipping test.";
+    }
+
+    const auto image_ci = vkt::Image::ImageCreateInfo2D(32, 32, 1, 1, format, VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+    vkt::Image src_image{*m_device, image_ci, vkt::set_layout};
+    vkt::Buffer dst_buffer{*m_device, 32 * 32 * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT};
+
+    VkCopyCommandTransformInfoQCOM transform_info = vku::InitStructHelper();
+    transform_info.transform = VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR;
+
+    VkBufferImageCopy2 region = vku::InitStructHelper(&transform_info);
+    region.imageSubresource = {VK_IMAGE_ASPECT_PLANE_0_BIT, 0, 0, 1};
+    region.imageOffset = {16, 0, 0};
+    region.imageExtent = {16, 16, 1};
+
+    VkCopyImageToBufferInfo2 copy_info = vku::InitStructHelper();
+    copy_info.srcImage = src_image;
+    copy_info.srcImageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    copy_info.dstBuffer = dst_buffer;
+    copy_info.regionCount = 1;
+    copy_info.pRegions = &region;
+
+    m_command_buffer.Begin();
+    m_errorMonitor->SetDesiredError("VUID-VkCopyImageToBufferInfo2KHR-pRegions-06206");
+    vk::CmdCopyImageToBuffer2(m_command_buffer, &copy_info);
+    m_errorMonitor->VerifyFound();
+    m_command_buffer.End();
+}
+
+TEST_F(NegativeCopyBufferImage, RotatedCopyImageToBufferButUseBlockCompressedImage) {
+    TEST_DESCRIPTION("Try to launch rotated copy-image-to-buffer, but the source image has a block-compressed format.");
+    SetTargetApiVersion(VK_API_VERSION_1_3);
+    AddRequiredExtensions(VK_QCOM_ROTATED_COPY_COMMANDS_EXTENSION_NAME);
+    RETURN_IF_SKIP(Init());
+
+    constexpr VkFormat format = VK_FORMAT_BC3_UNORM_BLOCK;
+    if (!FormatFeaturesAreSupported(Gpu(), format, VK_IMAGE_TILING_OPTIMAL, VK_FORMAT_FEATURE_TRANSFER_SRC_BIT)) {
+        GTEST_SKIP() << "VK_FORMAT_BC3_UNORM_BLOCK doesn't support transfer source, skipping test.";
+    }
+
+    const auto image_ci = vkt::Image::ImageCreateInfo2D(32, 32, 1, 1, format, VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+    vkt::Image src_image{*m_device, image_ci, vkt::set_layout};
+    vkt::Buffer dst_buffer{*m_device, 4096, VK_BUFFER_USAGE_TRANSFER_DST_BIT};
+
+    VkCopyCommandTransformInfoQCOM transform_info = vku::InitStructHelper();
+    transform_info.transform = VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR;
+
+    VkBufferImageCopy2 region = vku::InitStructHelper(&transform_info);
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.imageOffset = {16, 0, 0};
+    region.imageExtent = {16, 16, 1};
+
+    VkCopyImageToBufferInfo2 copy_info = vku::InitStructHelper();
+    copy_info.srcImage = src_image;
+    copy_info.srcImageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    copy_info.dstBuffer = dst_buffer;
+    copy_info.regionCount = 1;
+    copy_info.pRegions = &region;
+
+    m_command_buffer.Begin();
+    m_errorMonitor->SetDesiredError("VUID-VkCopyImageToBufferInfo2KHR-pRegions-04558");
+    vk::CmdCopyImageToBuffer2(m_command_buffer, &copy_info);
+    m_errorMonitor->VerifyFound();
+    m_command_buffer.End();
+}
+
+TEST_F(NegativeCopyBufferImage, RotatedCopyImageToBufferIdentityWithUnalignedWidth) {
+    TEST_DESCRIPTION("Try to launch copy-image-to-buffer with an identity transform, but the extent width is not block-aligned.");
+    SetTargetApiVersion(VK_API_VERSION_1_3);
+    AddRequiredExtensions(VK_QCOM_ROTATED_COPY_COMMANDS_EXTENSION_NAME);
+    RETURN_IF_SKIP(Init());
+
+    constexpr VkFormat format = VK_FORMAT_BC3_UNORM_BLOCK;
+    if (!FormatFeaturesAreSupported(Gpu(), format, VK_IMAGE_TILING_OPTIMAL, VK_FORMAT_FEATURE_TRANSFER_SRC_BIT)) {
+        GTEST_SKIP() << "VK_FORMAT_BC3_UNORM_BLOCK doesn't support transfer source, skipping test.";
+    }
+
+    const auto image_ci = vkt::Image::ImageCreateInfo2D(32, 32, 1, 1, format, VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+    vkt::Image src_image{*m_device, image_ci, vkt::set_layout};
+    vkt::Buffer dst_buffer{*m_device, 4096, VK_BUFFER_USAGE_TRANSFER_DST_BIT};
+
+    VkCopyCommandTransformInfoQCOM transform_info = vku::InitStructHelper();
+    transform_info.transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+
+    VkBufferImageCopy2 region = vku::InitStructHelper(&transform_info);
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.imageExtent = {14, 16, 1};
+
+    VkCopyImageToBufferInfo2 copy_info = vku::InitStructHelper();
+    copy_info.srcImage = src_image;
+    copy_info.srcImageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    copy_info.dstBuffer = dst_buffer;
+    copy_info.regionCount = 1;
+    copy_info.pRegions = &region;
+
+    m_command_buffer.Begin();
+    m_errorMonitor->SetDesiredError("VUID-VkCopyImageToBufferInfo2KHR-pRegions-04558");
+    m_errorMonitor->SetDesiredError("VUID-VkCopyImageToBufferInfo2-srcImage-00207");
+    vk::CmdCopyImageToBuffer2(m_command_buffer, &copy_info);
+    m_errorMonitor->VerifyFound();
+    m_command_buffer.End();
+}
+
+TEST_F(NegativeCopyBufferImage, RotatedCopyImageToBufferButSourceRegionIsOutsideImage) {
+    TEST_DESCRIPTION("Try to launch rotated copy-image-to-buffer, but the rotated source region is outside the image.");
+    SetTargetApiVersion(VK_API_VERSION_1_3);
+    AddRequiredExtensions(VK_QCOM_ROTATED_COPY_COMMANDS_EXTENSION_NAME);
+    RETURN_IF_SKIP(Init());
+
+    constexpr VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
+    const auto image_ci = vkt::Image::ImageCreateInfo2D(32, 32, 1, 1, format, VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+    vkt::Image src_image{*m_device, image_ci, vkt::set_layout};
+    vkt::Buffer dst_buffer{*m_device, 32 * 32 * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT};
+
+    VkCopyCommandTransformInfoQCOM transform_info = vku::InitStructHelper();
+    transform_info.transform = VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR;
+
+    VkBufferImageCopy2 region = vku::InitStructHelper(&transform_info);
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.imageOffset = {8, 0, 0};
+    region.imageExtent = {16, 16, 1};
+
+    VkCopyImageToBufferInfo2 copy_info = vku::InitStructHelper();
+    copy_info.srcImage = src_image;
+    copy_info.srcImageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    copy_info.dstBuffer = dst_buffer;
+    copy_info.regionCount = 1;
+    copy_info.pRegions = &region;
+
+    m_command_buffer.Begin();
+    m_errorMonitor->SetDesiredError("VUID-VkCopyImageToBufferInfo2KHR-pRegions-04557");
+    vk::CmdCopyImageToBuffer2(m_command_buffer, &copy_info);
+    m_errorMonitor->VerifyFound();
+    m_command_buffer.End();
+}
+
+TEST_F(NegativeCopyBufferImage, CopyImageToBuffer2ButSourceRegionIsOutsideImage) {
+    TEST_DESCRIPTION("Try to launch copy-image-to-buffer2, but the source region is outside the image.");
+    SetTargetApiVersion(VK_API_VERSION_1_3);
+    RETURN_IF_SKIP(Init());
+
+    constexpr VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
+    const auto image_ci = vkt::Image::ImageCreateInfo2D(32, 32, 1, 1, format, VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+    vkt::Image src_image{*m_device, image_ci, vkt::set_layout};
+    vkt::Buffer dst_buffer{*m_device, 32 * 32 * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT};
+
+    VkBufferImageCopy2 region = vku::InitStructHelper();
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.imageOffset = {24, 0, 0};
+    region.imageExtent = {16, 16, 1};
+
+    VkCopyImageToBufferInfo2 copy_info = vku::InitStructHelper();
+    copy_info.srcImage = src_image;
+    copy_info.srcImageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    copy_info.dstBuffer = dst_buffer;
+    copy_info.regionCount = 1;
+    copy_info.pRegions = &region;
+
+    m_command_buffer.Begin();
+    m_errorMonitor->SetDesiredError("VUID-VkCopyImageToBufferInfo2-imageOffset-00197");
+    m_errorMonitor->SetDesiredError("VUID-VkCopyImageToBufferInfo2-pRegions-04566");
     vk::CmdCopyImageToBuffer2(m_command_buffer, &copy_info);
     m_errorMonitor->VerifyFound();
     m_command_buffer.End();
